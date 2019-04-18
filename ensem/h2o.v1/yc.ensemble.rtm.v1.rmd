@@ -1,0 +1,423 @@
+---
+title: "Predicting Hospital Readmissions with Machine Learning (Part 2): Ensemble Learning"
+author: "yung chou"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, Evale=TRUE, warning=FALSE, message=FALSE
+ ,fig.align='center' #,out.width='50%' ,out.height='50%'
+)
+
+#-----------
+# LIBRARIES
+#-----------
+if (!require('parallel')) install.packages('parallel'); library(parallel)
+
+if (!require('filesstrings')) install.packages('filesstrings'); library(filesstrings)
+if (!require('dplyr')) install.packages('dplyr'); library(dplyr)
+if (!require('plotly')) install.packages('plotly'); library(plotly)
+
+if (!require('munsell')) install.packages("munsell"); library(munsell)
+if (!require('ggplot2')) install.packages('ggplot2'); library(ggplot2)
+
+if (!require('SuperLearner')) install.packages('SuperLearner'); library(SuperLearner)
+#if (!require('ranger' )) install.packages('ranger' ); library(ranger )
+#if (!require('xgboost')) install.packages('xgboost'); library(xgboost)
+#if (!require('caret'  )) install.packages('caret'  ); library(caret  )
+
+```
+This article described the framework and highlighted my steps to develop a Machine Learning model with ensemble learning for predicting [hospital readmissions](https://www.cms.gov/medicare/medicare-fee-for-service-payment/acuteinpatientpps/readmissions-reduction-program.html). In [Part 1](https://yungchou.wordpress.com/2018/12/12/data-preparation-of-diabetes-dataset-for-machine-learning/), I detailed the process to clean up and prepare the dataset, [Diabetes 130-US hospitals for years 1999-2008 Data Set](https://archive.ics.uci.edu/ml/datasets/diabetes+130-us+hospitals+for+years+1999-2008), downloaded from [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/index.php) for Machine Learning.
+
+## Data Set
+
+Notice that the data set employed for developing the ensemble described in this article was slightly different from the finalized data set in [Part 1](https://yungchou.wordpress.com/2018/12/12/data-preparation-of-diabetes-dataset-for-machine-learning/). Nevertheless, the process for preparing the data set was very much identical other than the feature set was based on results from a different [Boruta](https://www.jstatsoft.org/article/view/v036i11/v36i11.pdf) [(CRAN)](https://cran.r-project.org/package=Boruta) run.
+
+The original data set downloaded and visualized in [Part 1](https://yungchou.wordpress.com/2018/12/12/data-preparation-of-diabetes-dataset-for-machine-learning/) had 101766 observations of 49 variable. After preparation, the resulted data set imported here had 70245 observations of 27 variables. Here's the structure.
+
+```{r}
+rmd.info <- readRDS('info.rds')
+#rmd.threshold <- readRDS('threshold.rds')
+rmd.prefix <- rmd.info['prefix']
+rmd.save.dir <- rmd.info['save.dir']
+
+# knitr::include_graphics('img/cap1.jpg')
+```
+```{r echo=TRUE}
+# index column removed
+str(( rmd.imported.data.set <- read.csv( rmd.info[['imported.file']] )[-1] ))
+```
+
+In this project, I used a subset of the imported data set for developing an ensemble. With sufficient computing resources, I would have used 100% of the imported data set instead. Using my i7 laptop, for a few thousand observations, the training would have taken quite a few hours. With a smaller data set, it made the productivity more manageable.
+
+```{r}
+# Employed data
+cat(rmd.info[['percent']],'% of the imported data = '
+    ,(as.integer(rmd.info[['percent']])/100) 
+    ,'x',rmd.info[['total.obs,imported']], 'obs. ='
+    ,rmd.info[['employed.obs']] ,'obs.')
+
+```
+
+### Partitions
+
+I separated data into three partitions as the following:
+
+```{r}
+cat(
+  'Training (',rmd.info[['data.partition.train']],') = sampling'
+  ,as.numeric(rmd.info[['data.partition.train']])*100
+  ,'% of',rmd.info[['employed.obs']] ,'obs. ='
+  ,rmd.info[['nrow(train.org)']],'obs.'
+  ) 
+cat(
+  'Testing (',rmd.info[['data.partition.test']],') = smapling'
+  ,as.numeric(rmd.info[['data.partition.test']])*100
+  ,'% of',rmd.info[['employed.obs']] ,'obs. ='
+  ,rmd.info[['nrow(test)']],'obs.'
+  ) 
+cat(
+  'Training (',rmd.info[['data.partition.hold']],') = smapling'
+  ,as.numeric(rmd.info[['data.partition.hold']])*100
+  ,'% of',rmd.info[['employed.obs']] ,'obs. ='
+  ,rmd.info[['nrow(hold)']],'obs.'
+  )
+```
+
+## Class Imbalance
+
+While examining the training data, I noticed the label, **readmitted**, was with highly disproportional distribution of values. 
+
+```{r}
+if (as.logical(rmd.info['use.train.balanced'])) {
+  # METHOD 1 - USING EUQAL NUMBER OF 0's and 1's
+  #print('Customizing and Rebalancing the label data')
+  # The label data distribution originally
+  rmd.train.org.admitted <- readRDS('train.org.readmitted.rds')
+
+  # the label data with balanced distribution
+  rmd.train.balanced.readmitted <- readRDS('train.balanced.readmitted.rds')
+
+}else{
+
+  # METHOD 2 - USING SMOTE
+  # Using SMOTE to fix class imbalance
+  #print('Using SMOTE to rebalance the label data')
+
+  # The label data distribution originally
+  rmd.train.org.readmitted <- readRDS('train.org.readmitted.rds')
+
+  if (!require('DMwR')) install.packages('DMwR'); library(DMwR)
+  # the label data with SMOTE'd distribution
+  rmd.train.smote.readmitted <- readRDS('train.balanced.readmitted.rds'
+  );rmd.train.balanced.readmitted <- rmd.train.smote.readmitted
+
+}
+```
+```{r echo=TRUE}
+table(rmd.train.org.readmitted)
+```
+
+**This was problematic, as class imbalance tends to overwhelm a model and leads to incorrect classification.** Since during training, the model would have learned much more about zeros and become prone to classifying the label as 'not admitted', on the other hand known little about the situations of ones and how to predict 'readmitted' scenarios. Consequently, a trained model would predict potentially with a high misclassification rate.
+
+### SMOTE
+
+To circumvent the imbalance issue, I used [SMOTE](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1/topics/SMOTE) to generate a "SMOTE'd" set of values based on the label values. The following code illustrated using SMOTE from the package, [Data Mining with R(DMwR)](https://cran.r-project.org/web/packages/DMwR/index.html) to generate a data set for training, testing and cross-validation.
+
+Notice the balance between oversampling and undersampling are configurable with **perc.over** and **perc.under** as detailed in [the documentation](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1/topics/SMOTE).
+
+```{r echo=TRUE}
+table(rmd.train.balanced.readmitted)
+```
+
+```{r out.width='50%'}
+par(mfrow=c(1,2)
+);plot(rmd.train.org.readmitted ,las=1 ,col='lightblue' ,xlab='label(readmitted)'
+       ,main=sprintf('Class Imbalance of\nTraining Label\n(%i vs. %i)'
+         ,table(rmd.train.org.readmitted)[[1]],table(rmd.train.org.readmitted)[[2]])
+);plot(rmd.train.balanced.readmitted ,las=1 ,col='lightgreen' ,xlab='label(readmitted)'
+       ,main=sprintf('Customized/Rebalanced\nTraining Label\n(%i vs. %i)'
+         ,table(rmd.train.balanced.readmitted)[[1]],table(rmd.train.balanced.readmitted)[[2]])
+);par(mfrow=c(1,1))
+
+```
+Now the training data was ready. I started building an ensemble.
+
+## Ensemble Learning
+
+For a complex problem like hospital readmissions, realizing and optimizing [biases-variance tradeoff](http://www.cs.cornell.edu/courses/cs4780/2017sp/lectures/lecturenote11.html) is a challenge. And using ensemble learning to complement some algorithms' weakness with the others' strength by evaluating, weighting, combining, and optimizing their results seemed a right strategy and logical approach. The following illustrated the concept of ensemble learning and additional information is available at the source.
+
+### SuperLearner
+
+For constructing an ensemble model, I used  [SuperLearner](https://cran.r-project.org/web/packages/SuperLearner/index.html) which provides a user-friendly framework and essentially eliminates the mechanics for orchestrating cross validation of each algorithm from an ensemble developer. Here's a [tutorial](https://cran.r-project.org/web/packages/SuperLearner/vignettes/Guide-to-SuperLearner.html) to show how SuperLearner works. Notice that SuperLearner is a wrapper and algorithms included in ensemble must be installed first and required as libraries for invoking such algorithms.
+
+### Algorithms/Learners
+
+Hospital readmissions is a classification problem, since a patient is either readmitted or not. There have been a few algorithms known for solving classification problems including [RandomForest](https://www.rdocumentation.org/packages/randomForest/versions/4.6-14/topics/randomForest), [ranger](https://cran.r-project.org/web/packages/ranger/index.html), [Gradient Boosting](https://www.rdocumentation.org/packages/gbm/versions/2.1.4/topics/gbm), [xgboost](https://cran.r-project.org/web/packages/xgboost/index.html), [Elastic Net](https://www.rdocumentation.org/packages/glmnet/versions/2.0-16), [Support Vector Machines](https://cran.r-project.org/web/packages/e1071/vignettes/svmdoc.pdf), [Neural Network](https://cran.r-project.org/web/packages/nnet/index.html) (nnet), etc. To develop ensemble learning, one important task at this time was to investigate and select a set of algorithms, or learners, complementary to one another to make predictions with high accuracy. Incidentally, In the context of ensemble learning, an employed algorithm is also called a '**learner**' and they are used interchangeably for the remaining of the article.
+
+Using SuperLearner, I first gathered candidate learners to form an ensemble and generated some preliminary results, assessed the baseline performance, and resolved operability and compatibility issues, if any. At the same time, ran the ensemble with tuning parameters or test grids to find optimal settings for individual learners. After a series of testing, I eventually settled the ensemble with two learners, [**ranger**](https://cran.r-project.org/web/packages/ranger/index.html) and [**xgboost**](https://cran.r-project.org/web/packages/xgboost/index.html), and the following set of parameters.
+
+### Hyperparameter Tuning
+
+To create a test grid, SuperLearner provided the API, **[create.Learner](https://cran.r-project.org/web/packages/SuperLearner/SuperLearner.pdf)**. As demonstrated below, for each algorithm to be called by SuperLearner, I defined a range/set of values. **create.Learner** would reference/associate the settings with the algorithm and generate the function names associated with referenced parameters and values.
+
+```{r echo=TRUE, eval=FALSE}
+ranger.custom <- create.Learner('SL.ranger'
+ ,tune = list(
+    num.trees = c(1000,2000)
+   ,mtry = floor(sqrt(ncol(x.train))*c(1,2))
+   )
+ ,detailed_names = TRUE ,name_prefix = 'ranger'
+)
+
+xgboost.custom <- create.Learner('SL.xgboost'
+  ,tune=list( 
+    ntrees=c(500,1000) ,max_depth=4
+   ,shrinkage=c(0.001,0.01,0.1) ,minobspernode=c(10)
+   )
+  ,detailed_names = TRUE ,name_prefix = 'xgboost'
+)
+
+```
+
+And **create.Learer** generated functions accordingly based on combinations of the above settings as indicated by each function name:
+
+```{r}
+ranger.custom <- readRDS(paste0(rmd.save.dir,'ranger.custom.rds'))
+xgboost.custom <- readRDS(paste0(rmd.save.dir,'xgboost.custom.rds'))
+```
+
+```{r echo=TRUE}
+# Learners for ensemble learning
+ranger.custom$names
+xgboost.custom$names
+```
+
+### Ensemble
+
+To form an ensemble, I included the function names generated by **create.Learner** as a library reference for SuperLearner. Each function was a learner i.e. a designated algorithm with configured settings, and a member of the ensemble. 
+
+```{r echo=TRUE}
+# Ensemble
+SL.algorithm <- c( ranger.custom$names, xgboost.custom$names )
+```
+### Multicore Parallel Processing
+
+There appeared quite a few packages for enabling parallel processing in R, most are wrappers and ultimately fell in either '**multicore**' or '**snow**' system. And the package, [**parallel**](https://stat.ethz.ch/R-manual/R-devel/library/parallel/doc/parallel.pdf), was essential and what I used. My computing environment was Windows, therefore SNOW clusters were applicable. To minimize the complexity, instead of among multiple hosts I ran parallel processing in a single host using multiple CPUs of my laptop.
+
+The following is a **sample** configuration for training an ensemble in parallel. For demonstration, it ran all three SuperLearner evaluation methods, namely [NNLS](https://en.wikipedia.org/wiki/Non-negative_least_squares), [AUC](https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc) and [NNloglik]().
+
+### Setup
+
+```{r echo=TRUE, eval=FALSE}
+
+family   <- 'binomial'    #'gaussian'
+nnls     <- 'method.NNLS'
+auc      <- 'method.AUC'
+nnloglik <- 'method.NNloglik'
+
+#-------------------------------
+# MULTICORE/PARALLEL PROCESSING
+#-------------------------------
+if (!require('parallel')) install.packages('parallel'); library(parallel)
+
+cl <- makeCluster(detectCores()-1)
+
+clusterExport(cl, c( listWrappers()
+
+  ,'SuperLearner','CV.SuperLearner','predict.SuperLearner','cvControl'
+  ,'x.train','y.train','x.test','y.test','x.hold','y.hold'
+  ,'family','nnls','auc','nnloglik' ,'save.dir'
+
+  ,'SL.algorithm',ranger.custom$names ,xgboost.custom$names
+
+  ))
+
+clusterSetRNGStream(cl, iseed=135)
+
+# Load libraries on workers
+clusterEvalQ(cl, {
+  library(SuperLearner);library(caret)
+  library(ranger);library(xgboost)
+})
+```
+
+### Fitting Model with Training Data
+
+```{r echo=TRUE, eval=FALSE}
+clusterEvalQ(cl, {
+
+  ensem.auc <- SuperLearner(Y=y.train ,X=x.train #,verbose=TRUE
+    ,family=family,method=auc,SL.library=SL.algorithm
+    ,cvControl=list(V=cvControl)
+    )
+
+  ensem.nnloglik <- SuperLearner(Y=y.train ,X=x.train #,verbose=TRUE
+    ,family=family,method=nnloglik,SL.library=SL.algorithm
+    ,cvControl=list(V=cvControl)
+    )
+
+  ensem.nnls <- SuperLearner(Y=y.train ,X=x.train #,verbose=TRUE
+    ,family=family,method=nnls,SL.library=SL.algorithm
+    ,cvControl=list(V=cvControl)
+    )
+
+})
+```
+
+### Conduct Cross-Validaation with Hold Data
+
+```{r echo=TRUE, eval=FALSE}
+system.time({
+  
+  ensem.cv.auc <- CV.SuperLearner( Y=y.hold ,X=x.hold #,verbose=TRUE
+   ,cvControl=list(V=cvControl),innerCvControl=list(list(V=cvControl-1))
+   ,family=family ,method=auc ,SL.library=SL.algorithm ,parallel=cl
+  )
+  
+})
+
+system.time({
+  
+  ensem.cv.nnls <- CV.SuperLearner(Y=y.hold ,X=x.hold #,verbose=TRUE
+   ,cvControl=list(V=cvControl),innerCvControl=list(list(V=cvControl-1))
+   ,family=family ,method=nnls ,SL.library=SL.algorithm ,parallel=cl
+  )
+
+})
+
+system.time({
+  
+  ensem.cv.nnloglik <- CV.SuperLearner( Y=y.hold ,X=x.hold #,verbose=TRUE
+   ,cvControl=list(V=cvControl),innerCvControl=list(list(V=cvControl-1))
+   ,family=family ,method=nnloglik ,SL.library=SL.algorithm ,parallel=cl
+  )
+
+})
+
+stopCluster(cl)
+
+```
+
+## Risk Assessment
+
+SuperLearn evaluated the ensemble based on "risk" instead of "loss." 
+Both loss and risk measure how well a model fits data. To oversimplify the technical details, consider that "**loss**" measures a model performance against training data and "**risk**" is an average measure of loss, or expected loss, across unseen data, i.e. test and validation data.
+
+SuperLearner provided three methods for evaluating risks associated with predictions made by a learner included in an ensemble model, then derived and assigned a coefficient/weight/importance to the algorithm accordingly. The methods were **NNLS, AUC, and NNloglik**, as described on page 6 of [the  document](https://cran.r-project.org/web/packages/SuperLearner/SuperLearner.pdf).
+
+Based on the specified evaluation method, here nnls, SuperLearner ranked the importance of each learner by deriving and assigning a coefficient or weight, as illustrated by the following plot. And the smaller the coefficient, the less on average the algorithm would be expected to contribute to a prediction made by the ensemble. Here, a coefficient with zero indicated SuperLearner's removal of the associated algorithm from an associated ensemble.
+
+```{r}
+rmd.compare <- readRDS(paste0(rmd.save.dir,'compare.rds'));
+learner.risk <- rmd.compare[,1:3]
+learner.coef <- rmd.compare[,4:6]
+```
+
+```{r echo=TRUE}
+learner.risk
+learner.coef
+```
+
+```{r out.width='100%'}
+# p2d Risk_Coef plot
+  ensem.nnls     <- readRDS(paste0(rmd.save.dir,'ensem.nnls.rds'))
+  ensem.auc      <- readRDS(paste0(rmd.save.dir,'ensem.auc.rds' ))
+  ensem.nnloglik <- readRDS(paste0(rmd.save.dir,'ensem.nnloglik.rds'))
+
+rmd.p2d.risk_coef <- readRDS(paste0(rmd.save.dir,'p2d.risk_coef.rds'));rmd.p2d.risk_coef
+```
+
+## Prediction
+
+With test data, the ensemble made predictions with the following summary:
+
+```{r}
+rmd.pred.summary<- readRDS(paste0(rmd.save.dir,'pred.summary.rds')
+);rmd.pred.summary
+```
+
+### Distribution of Error Types
+
+The plot revealed the distribution of various error types of each method:
+
+- False Positive (FP, upper left quadrant)
+- Ture Negative (TN, lower left quadrant)
+- True Positive (TP, upper right quadrant)
+- False Negative (FN, lower right quadrant)
+
+```{r out.width='100%'}
+#if (!require('plotly')) install.packages('plotly');library(plotly)
+#if (!require('RColorBrewer')) install.packages('RColorBrewer');library(RColorBrewer)
+threshold <- rmd.info['threshold']
+
+rmd.p2d <- readRDS(paste0(rmd.save.dir,'p2d.rds'));rmd.p2d
+```
+
+```{r out.width='100%'}
+rmd.p2d.class <- readRDS(paste0(rmd.save.dir,'p2d.class.rds'));rmd.p2d.class
+
+```
+
+## Confusion Matrix
+
+```{r}
+confusion.matrix.nnls     <- readRDS(paste0(rmd.save.dir,'cm.nnls.rds')) 
+confusion.matrix.auc      <- readRDS(paste0(rmd.save.dir,'cm.auc.rds')) 
+confusion.matrix.nnloglik <- readRDS(paste0(rmd.save.dir,'cm.nnloglik.rds'))
+```
+```{r echo=TRUE}
+confusion.matrix.nnls
+```
+```{r echo=TRUE}
+confusion.matrix.auc
+```
+```{r echo=TRUE}
+confusion.matrix.nnloglik
+```
+
+## Accuracy Paradox
+
+For a binary classification problem with class imbalance, a predictive model may suffer [Accuracy Paradox](https://en.wikipedia.org/wiki/Accuracy_paradox) where accuracy may not be the best indicator for measuring how well a model performs. Consider the following statistics of the ensemble:
+
+```{r out.width='100%'}
+rmd.pred.accuracy.paradox <- readRDS(paste0(rmd.save.dir,'pred.accuracy.paradox.rds')
+);rmd.pred.accuracy.paradox
+```
+
+Since the data was with class imbalance towards 'not readmitted'. The **All No Occurrence**, i.e. classifying all as 'not readmitted', appeared with better accuracy than what were reported in **Accuracy**. And the ensemble seemed contributing little. On the surface, indeed. 
+
+However, for a Hospital Readmissions problem, what's more significant is perhaps the number of FN which is a patient predicted as 'not readmitted' while actually being observed as 'readmitted' in test data. This misclassification essentially misrepresents a patient's readiness for being released from the hospital. Prematurely releasing a patient introduces and increases the uncertainty of the patient's health relevant to the treatment received.
+
+In this case,
+
+- **All No Occurrence**, i.e. predicting all were 'not readmitted'  would have delivered 86% accuracy, while misclassified 14% which actually readmitted. 
+
+- while the ensemble had an only 74% or 76% accuracy, yet with above 20% [specificity](https://en.wikipedia.org/wiki/Confusion_matrix) which is the percentage of correctly classifying 'readmitted.' 
+
+
+In other words, the ensemble offered a better prediction for readmissions compared with those by **All No Occurrence**.
+
+## F1 Score
+
+Since this is a binary classification, ultimately used the F1 score to measure of the model's accuracy.
+
+$$F~1 = 2*((Precision*Recall)/(Precision+Recall)) = 2*(TP/(TP+FP+FN))$$
+where
+
+$$Precision = TP/(TP+FP)$$
+
+$$Recall = TP/(TP+FN)$$
+For terminology and derivations of Confusion Matrix, [additional information](https://en.wikipedia.org/wiki/Confusion_matrix) is available.
+
+```{r}
+cat(
+'tn.nnls =', (tn.nnls <- cm.nnls$table[1]),
+'\nfp.nnls =', (fp.nnls <- cm.nnls$table[2]),
+'\nfn.nnls =', (fn.nnls <- cm.nnls$table[3]),
+'\ntp.nnls =', (tp.nnls <- cm.nnls$table[4])
+)
+nnls.f1 <- 2*( tp.nnls/(tp.nnls+fp.nnls+fn.nnls) );nnls.f1
+
+```

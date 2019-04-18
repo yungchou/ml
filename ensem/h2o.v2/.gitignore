@@ -1,16 +1,11 @@
-dataset_diabetes
-ensembleR
-fruits-360
-private
-misc
-ensembleR
-#dataset
-#data
+_private
 Downloads
+dataset
+data
 no.git.push
 rsconnect
 .vscode
-#*.pptx
+*.pptx
 
 # History files
 .Rhistory
