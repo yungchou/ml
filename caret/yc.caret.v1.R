@@ -1,18 +1,15 @@
-if (!require('caret')) install.packages('caret', dependencies=c("Depends","Suggests") ); library(caret  )
-if (!require('GGally')) install.packages('GGally'); library(GGally)
-if (!require('plotly')) install.packages('plotly'); library(plotly)
-if (!require('dplyr')) install.packages('dplyr'); library(dplyr)
 
 lapply(
   #  lib <- c('randomForest', 'caret', 'e1071'),
   lib <- c(
-     'deplyr','data.table'
+     'dplyr','data.table'
     ,'ggplot','GGally','plotly'
     ,'randomForest'
     ,'caret'
     ),
-  require,
-  character.only = TRUE
+  reqLib <- function(x){
+    if (!require(x)) install.packages(x); library(x,character.only = TRUE)
+  }
 )
 
 system.time(df1 <- data.table::fread( mydataset <- './dataset/creditcard.csv' ))
