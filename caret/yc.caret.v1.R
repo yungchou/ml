@@ -1,21 +1,18 @@
 
 lapply(
-  #  lib <- c('randomForest', 'caret', 'e1071'),
   lib <- c(
      'dplyr','data.table'
-    ,'ggplot','GGally','plotly'
-    ,'randomForest'
-    ,'caret'
+#    ,'ggplot2','GGally','plotly'
+#    ,'randomForest'
+#    ,'caret'#, 'e1071'
     ),
-  reqLib <- function(x){
-    if (!require(x)) install.packages(x); library(x,character.only = TRUE)
-  }
+  library, character.only=TRUE
 )
 
 system.time(df1 <- data.table::fread( mydataset <- './dataset/creditcard.csv' ))
 
 str(df)
-ggcorr(df[1:100,2:8], palette = "RdBu", label = TRUE)
+ggcorr(df[1:100,2:8], palette="RdBu", label=TRUE)
 ggplotly(ggpairs(df[1:100,2:8]))
 
 source("./helper/yc.helper.R");
