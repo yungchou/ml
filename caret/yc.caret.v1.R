@@ -2,6 +2,9 @@
 lapply(
   lib <- c(
      'dplyr','data.table'
+     ,'trees'  # for constructing classification and regression trees
+     ,'ISLR'   # Introduction to Statictical Learning with R
+     ,'gbm'    # Generalized Boosted Regression Models
 #    ,'ggplot2','GGally','plotly'
 #    ,'randomForest'
 #    ,'caret'#, 'e1071'
