@@ -1,10 +1,12 @@
 
 lapply(
   lib <- c(
-     'dplyr','data.table'
-     ,'trees'  # for constructing classification and regression trees
-     ,'ISLR'   # Introduction to Statictical Learning with R
-     ,'gbm'    # Generalized Boosted Regression Models
+#     'dplyr','data.table'
+#     ,'trees'  # for constructing classification and regression trees
+#     ,'ISLR'   # Introduction to Statictical Learning with R
+#     ,'HSAUR3' # A Handbook of Statistical Analyses Using R (3rd Edition)
+     # https://rdrr.io/cran/HSAUR3/
+#     ,'gbm'    # Generalized Boosted Regression Models
 #    ,'ggplot2','GGally','plotly'
 #    ,'randomForest'
 #    ,'caret'#, 'e1071'
