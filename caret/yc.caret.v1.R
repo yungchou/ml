@@ -1,20 +1,19 @@
+info <- c()
 
-lapply(
-  lib <- c(
-#     'dplyr','data.table'
-#     ,'trees'  # for constructing classification and regression trees
-#     ,'ISLR'   # Introduction to Statictical Learning with R
-#     ,'HSAUR3' # A Handbook of Statistical Analyses Using R (3rd Edition)
-     # https://rdrr.io/cran/HSAUR3/
-#     ,'gbm'    # Generalized Boosted Regression Models
-#    ,'ggplot2','GGally','plotly'
-#    ,'randomForest'
-#    ,'caret'#, 'e1071'
-    ),
-  library, character.only=TRUE
-)
+info['lib'] <- lapply( lib <- c( #'data.table',
+  'dplyr','ggplot2','GGally','plotly'  # yung'c baseline
+#  ,'trees'  # for constructing classification and regression trees
+#  ,'ISLR'   # Introduction to Statictical Learning with R
+#  ,'HSAUR3' # A Handbook of Statistical Analyses Using R (3rd Edition)
+  # https://rdrr.io/cran/HSAUR3/
+#  ,'gbm'    # Generalized Boosted Regression Models
+#  ,'randomForest'
+#  ,'caret'#
+#  ,'e1071'
+  ), library, character.only=TRUE )
 
-system.time(df1 <- data.table::fread( mydataset <- './dataset/creditcard.csv' ))
+system.time(df <- data.table::fread(
+  info['data.source'] <- './dataset/creditcard.csv' ))
 
 str(df)
 ggcorr(df[1:100,2:8], palette="RdBu", label=TRUE)
