@@ -24,7 +24,8 @@ missingness(df)
 mydf <- splitting(df, training=0.6, testing=0.2, holding=0.2)
 
 # Recursive Feature Elimination Useing Caret
-if (!require('caret')) install.packages('caret', dependencies=c("Depends","Suggests") ); library(caret  )
+#if (!require('caret')) install.packages('caret', dependencies=c("Depends","Suggests") ); library(caret)
+library(caret)
 
 set.seed(1.1)
 
@@ -56,8 +57,6 @@ importance <- varImp(model, scale=FALSE)
 print(importance)
 # plot importance
 ggplot(importance)
-
-
 
 # define the control using a random forest selection function
 control <- rfeControl(functions=rfFuncs, method="cv", number=10)
